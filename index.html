@@ -269,13 +269,14 @@ $('testBtn').onclick = async () => {
 
 // ইনস্টল বার: শুধু তখনই দেখায় যখন ব্রাউজার ইনস্টল প্রম্পট দিতে পারে এবং অ্যাপ এখনো ইনস্টল করা নয়
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-const dismissed = load('installDismissed', false);
+try { localStorage.removeItem('installDismissed'); } catch {}  // আগের ভার্সনে সেভ হওয়া পুরোনো ফ্ল্যাগ মুছে দেয়
+let dismissed = false;  // ✕ চাপলে শুধু এই খোলার সময়টুকুর জন্য লুকায়, রিলোড দিলে আবার আসে
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; if (!standalone && !dismissed) $('installBar').hidden = false; });
 $('installBtn').onclick = async () => {
   if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; $('installBar').hidden = true; }
 };
-$('installX').onclick = () => { $('installBar').hidden = true; save('installDismissed', true); };
-window.addEventListener('appinstalled', () => { $('installBar').hidden = true; save('installDismissed', true); });
+$('installX').onclick = () => { $('installBar').hidden = true; dismissed = true; };
+window.addEventListener('appinstalled', () => { $('installBar').hidden = true; });
 if (!standalone && !dismissed && /iphone|ipad/i.test(navigator.userAgent)) {
   $('installTxt').textContent = 'ইনস্টল করতে Safari-তে Share চেপে "Add to Home Screen" দিন';
   $('installBtn').hidden = true; $('installBar').hidden = false;
