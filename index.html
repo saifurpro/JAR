@@ -11,14 +11,15 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <style>
-:root{--ink:#1c2340;--paper:#e9ecf4;--tkt:#fff;--mut:#667090;--line:#c9cee0;--red:#d7263d;--redl:#fde8eb;--grn:#0b7a4b;--grnl:#dff3e8;--amb:#b45309}
+:root{--ink:#1c2340;--paper:#e9ecf4;--tkt:#fff;--mut:#667090;--line:#c9cee0;--red:#d7263d;--redl:#fde8eb;--grn:#0b7a4b;--grnl:#dff3e8;--amb:#0b7a4b}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font-family:'Noto Sans Bengali','Kalpurush','Siyam Rupali','Nirmala UI','Hind Siliguri',system-ui,sans-serif;font-size:16px;line-height:1.5;padding-bottom:calc(40px + env(safe-area-inset-bottom))}
 header{background:var(--ink);color:#fff;padding:calc(20px + env(safe-area-inset-top)) 18px 26px;position:relative}
 header h1{margin:0;font-size:25px;font-weight:800;letter-spacing:-.2px}
 header p{margin:2px 0 0;font-size:14px;color:#aab2d3}
-header::after{content:"";position:absolute;left:0;right:0;bottom:-8px;height:16px;background:radial-gradient(circle at 8px 0,var(--paper) 7px,transparent 7.5px) 0 0/16px 16px repeat-x}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-8px;height:16px;background:radial-gradient(circle at 15px 0,var(--paper) 7px,transparent 7.5px) 0 0/16px 16px repeat-x}
 main{max-width:560px;margin:0 auto;padding:26px 14px 0}
 .bar{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--ink);color:#fff;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:14px}
 .bar.warn{background:#fff4e0;color:#6b3d05;border:1px solid #f0cf94}
@@ -36,6 +37,8 @@ button.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 2px 
 button.small{padding:6px 12px;font-size:14px}
 button.del{background:transparent;color:var(--red);box-shadow:inset 0 0 0 1.5px #ecb3bb}
 .bar button{background:#fff;color:var(--ink)}
+.bar .x{background:transparent;color:inherit;padding:6px 8px;font-size:16px}
+.bar .bs{display:flex;gap:6px;flex:none}
 .full{width:100%;margin-top:18px;padding:12px;font-size:17px}
 h2{font-size:15px;color:var(--mut);margin:22px 2px 10px;font-weight:700}
 
@@ -72,9 +75,9 @@ h2{font-size:15px;color:var(--mut);margin:22px 2px 10px;font-weight:700}
 </style>
 </head>
 <body>
-<header><h1>জব এপ্লাই রিমাইন্ডার</h1><p>আবেদনের তারিখ আর কখনো মিস হবে না</p></header>
+<header><h1>জব এপ্লাই রিমাইন্ডার</h1><p>তারিখ পেরোনোর আগেই আবেদন</p></header>
 <main>
-  <div id="installBar" class="bar" hidden><span id="installTxt">ফোনে অ্যাপ হিসেবে বসান</span><button id="installBtn" class="small">ইনস্টল</button></div>
+  <div id="installBar" class="bar" hidden><span id="installTxt">ফোনে অ্যাপ হিসেবে বসান</span><span class="bs"><button id="installBtn" class="small">ইনস্টল</button><button id="installX" class="x" aria-label="বন্ধ করুন">✕</button></span></div>
   <div id="permBanner" class="bar warn" hidden><span>নোটিফিকেশন চালু করা নেই</span><button id="permBtn" class="small">চালু করুন</button></div>
 
   <div class="panel">
@@ -161,19 +164,19 @@ function tick() {
   if (changed) save('fired', fired);
 }
 
-const trigOK = () => 'Notification' in window && 'showTrigger' in Notification.prototype && typeof TimestampTrigger !== 'undefined';
+// IndexedDB: সার্ভিস ওয়ার্কার ব্যাকগ্রাউন্ডে এখান থেকে চাকরির তথ্য পড়ে
+const idb = () => new Promise((res, rej) => { const r = indexedDB.open('jr', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const idbSet = async (k, v) => { try { const db = await idb(); await new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); } catch (e) {} };
+const mirror = () => idbSet('data', { jobs, cfg });
 
-async function syncTriggers() {
-  if (!reg || !trigOK() || Notification.permission !== 'granted') return;
+async function regPeriodic() {
   try {
-    (await reg.getNotifications({ includeTriggered: true })).filter(n => n.tag && n.tag.startsWith('trg_')).forEach(n => n.close());
-    const now = Date.now();
-    for (const j of jobs.filter(x => !x.applied)) {
-      const [t, b] = msgFor(j);
-      for (const d of schedule(j)) if (d.getTime() > now)
-        await reg.showNotification(t, { body: b, tag: 'trg_' + j.id + '_' + d.getTime(), icon: 'icon-192.png', showTrigger: new TimestampTrigger(d.getTime()) });
-    }
-  } catch (e) {}
+    if (!reg || !('periodicSync' in reg)) return false;
+    const st = await navigator.permissions.query({ name: 'periodic-background-sync' });
+    if (st.state !== 'granted') return false;
+    await reg.periodicSync.register('check-reminders', { minInterval: 60 * 60 * 1000 });
+    return true;
+  } catch (e) { return false; }
 }
 
 function status(j) {
@@ -228,7 +231,7 @@ function render() {
     (done.length ? `<h2>আবেদন হয়ে গেছে · ${bn(done.length)}টি</h2>` + done.map(card).join('') : '');
 }
 
-function persist() { save('jobs', jobs); render(); syncTriggers(); }
+function persist() { save('jobs', jobs); render(); mirror(); }
 
 $('add').onclick = () => {
   const name = $('name').value.trim(), start = $('start').value, end = $('end').value;
@@ -244,17 +247,19 @@ $('list').onclick = e => {
   else if (t.dataset.undo) { jobs.find(j => j.id === t.dataset.undo).applied = false; persist(); }
   else if (t.dataset.del && confirm('এটি মুছে ফেলবেন?')) { jobs = jobs.filter(j => j.id !== t.dataset.del); persist(); }
 };
-['tm', 'te'].forEach(id => $(id).onchange = () => { cfg = { m: $('tm').value || '08:00', e: $('te').value || '19:00' }; save('cfg', cfg); render(); syncTriggers(); });
+['tm', 'te'].forEach(id => $(id).onchange = () => { cfg = { m: $('tm').value || '08:00', e: $('te').value || '19:00' }; save('cfg', cfg); render(); mirror(); });
 
+let bgOn = false;
 function permUI() { $('permBanner').hidden = !('Notification' in window) || Notification.permission === 'granted'; statUI(); }
 function statUI() {
-  $('stat').textContent = trigOK()
-    ? 'এই ফোনে আগাম শিডিউল সাপোর্ট আছে: অ্যাপ বন্ধ থাকলেও নোটিফিকেশন আসার কথা।'
-    : 'এই ফোনে অ্যাপ বন্ধ অবস্থায় আগাম শিডিউল সাপোর্ট নেই: অ্যাপ খোলা বা ব্যাকগ্রাউন্ডে থাকলে নোটিফিকেশন আসবে, বন্ধ থাকলে পরের বার খুললে মিস হওয়া রিমাইন্ডার দেখাবে।';
+  $('stat').textContent = bgOn
+    ? 'ব্যাকগ্রাউন্ড চেক চালু আছে: অ্যাপ বন্ধ থাকলেও ফোন মাঝেমধ্যে চেক করে রিমাইন্ডার দেখাতে পারে। তবে ঠিক নির্ধারিত সময়ে আসার নিশ্চয়তা নেই, দেরি হতে পারে।'
+    : 'ব্যাকগ্রাউন্ড চেক চালু হয়নি: অ্যাপ খোলা বা ব্যাকগ্রাউন্ডে থাকলে নোটিফিকেশন আসবে। বন্ধ থাকলে পরের বার খুললে মিস হওয়া রিমাইন্ডার দেখাবে।';
 }
 $('permBtn').onclick = async () => {
   if (!('Notification' in window)) return alert('এই ব্রাউজারে নোটিফিকেশন সাপোর্ট নেই।');
-  await Notification.requestPermission(); permUI(); syncTriggers();
+  if (Notification.permission === 'denied') return alert('নোটিফিকেশন ব্লক করা আছে। ফোনের সেটিংস > অ্যাপ > জব রিমাইন্ডার > নোটিফিকেশন থেকে চালু করুন।');
+  await Notification.requestPermission(); permUI();
 };
 $('testBtn').onclick = async () => {
   if (!('Notification' in window)) return alert('এই ব্রাউজারে নোটিফিকেশন সাপোর্ট নেই।');
@@ -262,21 +267,24 @@ $('testBtn').onclick = async () => {
   permUI(); notify('জব এপ্লাই রিমাইন্ডার', 'নোটিফিকেশন ঠিকমতো কাজ করছে ✓', 'test');
 };
 
-// ইনস্টল
+// ইনস্টল বার: শুধু তখনই দেখায় যখন ব্রাউজার ইনস্টল প্রম্পট দিতে পারে এবং অ্যাপ এখনো ইনস্টল করা নয়
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; if (!standalone) $('installBar').hidden = false; });
+const dismissed = load('installDismissed', false);
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; if (!standalone && !dismissed) $('installBar').hidden = false; });
 $('installBtn').onclick = async () => {
   if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; $('installBar').hidden = true; }
 };
-window.addEventListener('appinstalled', () => { $('installBar').hidden = true; });
-if (!standalone && /iphone|ipad/i.test(navigator.userAgent)) {
+$('installX').onclick = () => { $('installBar').hidden = true; save('installDismissed', true); };
+window.addEventListener('appinstalled', () => { $('installBar').hidden = true; save('installDismissed', true); });
+if (!standalone && !dismissed && /iphone|ipad/i.test(navigator.userAgent)) {
   $('installTxt').textContent = 'ইনস্টল করতে Safari-তে Share চেপে "Add to Home Screen" দিন';
   $('installBtn').hidden = true; $('installBar').hidden = false;
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(r => { reg = r; syncTriggers(); }).catch(() => {});
+  navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(async r => { reg = r; mirror(); bgOn = await regPeriodic(); statUI(); }).catch(() => {});
 }
+mirror();
 permUI(); render(); tick();
 setInterval(tick, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); render(); } });
